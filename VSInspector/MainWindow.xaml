@@ -3,10 +3,46 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:local="clr-namespace:VSInspector"
+        xmlns:local="clr-namespace:VSInspector.ViewModels"
         mc:Ignorable="d"
-        Title="MainWindow" Height="450" Width="800">
+        Title="Visual Studio Inspector" 
+        Height="900" 
+        Width="1600">
+    <Window.DataContext>
+        <local:InspectorViewModel />
+    </Window.DataContext>
     <Grid>
-        
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="500" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition/>
+        </Grid.ColumnDefinitions>
+        <DataGrid Grid.Column="0" x:Name="Processes" ItemsSource="{Binding Path=Processes}" AutoGenerateColumns="False">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Window Title" Binding="{Binding WindowTitle}" Width="*"/>
+                <DataGridTextColumn Header="Process" Binding="{Binding ProcessId}" Width="50"/>
+                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="50"/>
+            </DataGrid.Columns>
+        </DataGrid>
+        <GridSplitter Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Stretch" Background="Black" ShowsPreview="True" Width="1" />
+        <TabControl Grid.Column="2" TabStripPlacement="Bottom">
+            <TabItem Header="Images">
+                <DataGrid ItemsSource="{Binding ElementName=Processes, Path=SelectedItem.(local:ProcessViewModel.Images)}" AutoGenerateColumns="False">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="File" Binding="{Binding FileName, Mode=OneWay}" Width="400" />
+                        <DataGridTextColumn Header="Path" Binding="{Binding FilePath, Mode=OneWay}" Width="300">
+                            <DataGridTextColumn.CellStyle>
+                                <Style TargetType="DataGridCell">
+                                    <Setter Property="ToolTip" Value="{Binding FilePath}" />
+                                </Style>
+                            </DataGridTextColumn.CellStyle>
+                        </DataGridTextColumn>
+                        <DataGridTextColumn Header="Base" Binding="{Binding ImageBase, Mode=OneWay}" Width="130" />
+                        <DataGridTextColumn Header="Order" Binding="{Binding LoadOrder, Mode=OneWay}" Width="50" />
+                        <DataGridTextColumn Header="Status" Binding="{Binding Status, Mode=OneWay}" Width="50" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+        </TabControl>
     </Grid>
 </Window>
