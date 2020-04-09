@@ -111,7 +111,6 @@ namespace VSInspector.Models
             {
                 if (_loadedImages.ContainsKey(imageBase))
                 {
-                    // TODO: Emit message
                     return;
                 }
 
@@ -129,7 +128,6 @@ namespace VSInspector.Models
                 if (!_loadedImages.TryGetValue(imageBase, out var imageModel) ||
                     imageModel.FileName != fileName)
                 {
-                    // TODO: Emit message
                     return;
                 }
 

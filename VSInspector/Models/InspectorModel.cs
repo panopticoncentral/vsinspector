@@ -1,5 +1,8 @@
 ﻿using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using System.Threading.Tasks;
+using Microsoft.Diagnostics.Symbols;
 using Microsoft.Diagnostics.Tracing;
 using Microsoft.Diagnostics.Tracing.Etlx;
 using Microsoft.Diagnostics.Tracing.Parsers;
@@ -15,10 +18,17 @@ namespace VSInspector.Models
             KernelTraceEventParser.Keywords.ImageLoad |
             KernelTraceEventParser.Keywords.Process;
 
+        private const KernelTraceEventParser.Keywords KernelStackTrace =
+            KernelTraceEventParser.Keywords.Process;
+
         private const ClrTraceEventParser.Keywords ClrProviders =
             ClrTraceEventParser.Keywords.Jit |
             ClrTraceEventParser.Keywords.JittedMethodILToNativeMap |
             ClrTraceEventParser.Keywords.Loader;
+
+        private const ClrTraceEventParser.Keywords ClrRundownProviders =
+            ClrProviders |
+            ClrTraceEventParser.Keywords.StartEnumeration;
 
         private static InspectorModel _instance;
 
@@ -33,9 +43,9 @@ namespace VSInspector.Models
         public InspectorModel()
         {
             _eventSession = new TraceEventSession("VSInspector");
-            _eventSession.EnableKernelProvider(KernelProviders);
+            _eventSession.EnableKernelProvider(KernelProviders, KernelStackTrace);
             _eventSession.EnableProvider(ClrTraceEventParser.ProviderGuid, TraceEventLevel.Informational, (ulong)ClrProviders);
-            _eventSession.EnableProvider(ClrRundownTraceEventParser.ProviderGuid, TraceEventLevel.Informational, (ulong)ClrProviders);
+            _eventSession.EnableProvider(ClrRundownTraceEventParser.ProviderGuid, TraceEventLevel.Informational, (ulong)ClrRundownProviders);
 
             _traceLogEventSource = TraceLog.CreateFromTraceEventSession(_eventSession);
             _traceLogEventSource.Kernel.ProcessStartGroup += Kernel_ProcessStart;
@@ -45,6 +55,26 @@ namespace VSInspector.Models
             _traceLogEventSource.Kernel.ImageUnload += Kernel_ImageUnload;
 
             Task.Run(() => _traceLogEventSource.Process());
+        }
+
+        public void Dispose()
+        {
+            _traceLogEventSource.Kernel.ProcessStartGroup -= Kernel_ProcessStart;
+            _traceLogEventSource.Kernel.ProcessStop -= Kernel_ProcessStop;
+            _traceLogEventSource.Kernel.ImageDCStart -= Kernel_ImageDCStart;
+            _traceLogEventSource.Kernel.ImageLoad -= Kernel_ImageLoad;
+            _traceLogEventSource.Kernel.ImageUnload -= Kernel_ImageUnload;
+
+            _traceLogEventSource.Dispose();
+            _eventSession.Dispose();
+
+            lock (_lock)
+            {
+                foreach (var processModel in _processes.Values)
+                {
+                    processModel.Dispose();
+                }
+            }
         }
 
         public void AddObserver(IInspectorObserver observer)
@@ -101,38 +131,6 @@ namespace VSInspector.Models
             }
         }
 
-        private void Kernel_ImageUnload(ImageLoadTraceData data)
-        {
-            if (!EventFilter(data))
-            {
-                return;
-            }
-
-            lock (_lock)
-            {
-                if (_processes.TryGetValue(data.ProcessID, out var processModel))
-                {
-                    processModel.NotifyImageUnload(data.FileName, data.ImageBase);
-                }
-            }
-        }
-
-        private void Kernel_ImageLoad(ImageLoadTraceData data)
-        {
-            if (!EventFilter(data))
-            {
-                return;
-            }
-
-            lock (_lock)
-            {
-                if (_processes.TryGetValue(data.ProcessID, out var processModel))
-                {
-                    processModel.NotifyImageLoad(data.FileName, data.ImageBase);
-                }
-            }
-        }
-
         private void Kernel_ImageDCStart(ImageLoadTraceData data)
         {
             if (!EventFilter(data))
@@ -149,22 +147,61 @@ namespace VSInspector.Models
             }
         }
 
-        public void Dispose()
+        private void Kernel_ImageLoad(ImageLoadTraceData data)
         {
-            _traceLogEventSource.Kernel.ProcessStartGroup -= Kernel_ProcessStart;
-            _traceLogEventSource.Kernel.ProcessStop -= Kernel_ProcessStop;
-            _traceLogEventSource.Kernel.ImageDCStart -= Kernel_ImageDCStart;
-            _traceLogEventSource.Kernel.ImageLoad -= Kernel_ImageLoad;
-            _traceLogEventSource.Kernel.ImageUnload -= Kernel_ImageUnload;
-
-            _traceLogEventSource.Dispose();
-            _eventSession.Dispose();
+            if (!EventFilter(data))
+            {
+                return;
+            }
 
             lock (_lock)
             {
-                foreach (var processModel in _processes.Values)
+                var symbolPath = new SymbolPath(SymbolPath.SymbolPathFromEnvironment).Add(SymbolPath.MicrosoftSymbolServerPath);
+                SymbolReader symbolReader = new SymbolReader(new StringWriter(), symbolPath.ToString())
                 {
-                    processModel.Dispose();
+                    SecurityCheck = path => true
+                };
+                var callStack = data.CallStack();
+                if (callStack != null)
+                {
+                    while (callStack != null)
+                    {
+                        var codeAddress = callStack.CodeAddress;
+                        if (codeAddress.Method == null)
+                        {
+                            var moduleFile = codeAddress.ModuleFile;
+                            if (moduleFile == null)
+                            {
+                                Trace.WriteLine($"Could not find module for Address 0x{codeAddress.Address:x}");
+                            }
+                            else
+                            {
+                                codeAddress.CodeAddresses.LookupSymbolsForModule(symbolReader, moduleFile);
+                            }
+                        }
+                        callStack = callStack.Caller;
+                    }
+                }
+
+                if (_processes.TryGetValue(data.ProcessID, out var processModel))
+                {
+                    processModel.NotifyImageLoad(data.FileName, data.ImageBase);
+                }
+            }
+        }
+
+        private void Kernel_ImageUnload(ImageLoadTraceData data)
+        {
+            if (!EventFilter(data))
+            {
+                return;
+            }
+
+            lock (_lock)
+            {
+                if (_processes.TryGetValue(data.ProcessID, out var processModel))
+                {
+                    processModel.NotifyImageUnload(data.FileName, data.ImageBase);
                 }
             }
         }
