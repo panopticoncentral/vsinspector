@@ -2,7 +2,7 @@
   "profiles": {
     "VSInspector": {
       "commandName": "Project",
-      "commandLineArgs": "--trace C:\\data\\scratch\\vsinspector\\Solution_001_0151_nocache_SolutionOpen.etl.zip --cached-symbols-only"
+      "nativeDebugging": true
     }
   }
 }
